@@ -1,0 +1,78 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Description": "",
+    "Metadata": {
+
+    },
+    "Parameters": {
+      "BucketName": {
+          "Description": "Static website name. If registering with route 53, must be exact url (ie www.foo.io).",
+          "Type": "String",
+          "Default": "mylabbucket"
+      },
+      "Project": {
+          "Description": "Name of your project for various resource tags.",
+          "Type": "String",
+          "Default": "s3 lab"
+      },
+      "HostedZoneId": {
+          "Description": "Optional. For registering your S3 website endpoint to a Route 53 Alias record set.",
+          "Type": "String",
+          "Default": "Z3AQBSTGFYJSTF"
+      }
+
+    },
+    "Mappings": {
+
+    },
+    "Conditions": {
+
+    },
+    "Resources": {
+      "myS3Bucket": {
+        "Type": "AWS::S3::Bucket",
+        "DeletionPolicy": "Retain",
+        "Properties": {
+          "AccessControl": "PublicRead",
+          "BucketName": { "Ref": "BucketName" },
+          "CorsConfiguration": {
+            "CorsRules" : [{
+  							"AllowedHeaders" : ["*"],
+  							"AllowedMethods" : ["GET"],
+  							"AllowedOrigins" : ["*"],
+  							"MaxAge" : "3000"
+              }]
+          },
+          "VersioningConfiguration": {"Status": "Enabled"},
+          "WebsiteConfiguration":
+            {
+              "ErrorDocument" : "error.html",
+              "IndexDocument" : "index.html"
+            },
+          "Tags": [{"Key" : "Project", "Value" : { "Ref": "Project" }}]
+        }
+      },
+
+      "myS3BucketPolicy": {
+        "Type": "AWS::S3::BucketPolicy",
+        "DependsOn" : "myS3Bucket",
+        "Properties": {
+          "Bucket" : { "Ref": "BucketName" },
+          "PolicyDocument" : {
+            "Version":"2012-10-17",
+            "Statement": [{
+              "Sid": "Allow Public GET request",
+              "Effect": "Allow",
+              "Principal": "*",
+              "Action": "s3:GetObject",
+              "Resource": {"Fn::Join" : ["",[ "arn:aws:s3:::", { "Ref": "BucketName" }, "/*" ] ]}}]}
+        }
+      },
+
+    "Outputs": {
+      "myS3Bucket" : {
+        "Description" : "S3 URL for website.",
+        "Value" : { "Fn::GetAtt" : [ "myS3Bucket", "WebsiteURL" ]}
+      }
+    }
+}
