@@ -42,6 +42,11 @@
         "Properties": {
           "AccessControl": "PublicRead",
           "BucketName": { "Ref": "SiteBucketName" },
+          "LoggingConfiguration":
+            {
+              "DestinationBucketName" : { "Ref": "LogsBucketName" },
+              "LogFilePrefix" : "S3",
+            },
           "CorsConfiguration": {
             "CorsRules" : [{
   							"AllowedHeaders" : ["*"],
@@ -124,7 +129,8 @@
         "Type" : "AWS::CertificateManager::Certificate",
         "Properties" : {
           "DomainName" : { "Ref": "NakedDomainName" },
-          "Tags": [{"Key" : "Project", "Value" : { "Ref": "Project" }}]
+          "SubjectAlternativeNames" : [{"Fn::Join" : ["",[ "www.", { "Ref": "NakedDomainName" } ] ]}],
+          "Tags" : [{"Key" : "Project", "Value" : { "Ref": "Project" }}]
         }
       },
 
@@ -161,8 +167,14 @@
                       "ResponseCode" : "200",
                       "ErrorCachingMinTTL" : "30"
                   } ],
-                 "PriceClass" : "PriceClass_100",
-                 "ViewerCertificate": {
+                  "Logging" :
+                    {
+                      "Bucket" : { "Ref": "LogsBucketName" },
+                      "IncludeCookies" : "true",
+                      "Prefix" : "CloudFront"
+                    },
+                  "PriceClass" : "PriceClass_100",
+                  "ViewerCertificate": {
                     "AcmCertificateArn" : { "Ref": "myCertificate" },
                     "SslSupportMethod" : "sni-only"
                   }
