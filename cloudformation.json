@@ -44,8 +44,8 @@
           "BucketName": { "Ref": "SiteBucketName" },
           "LoggingConfiguration":
             {
-              "DestinationBucketName" : { "Ref": "LogsBucketName" },
-              "LogFilePrefix" : "S3",
+              "DestinationBucketName" : { "Ref": "myS3LogBucket" },
+              "LogFilePrefix" : "S3"
             },
           "CorsConfiguration": {
             "CorsRules" : [{
@@ -84,7 +84,7 @@
       "myS3LogBucket": {
         "Type": "AWS::S3::Bucket",
         "Properties": {
-          "AccessControl": "Private",
+          "AccessControl" : "LogDeliveryWrite",
           "BucketName": { "Ref": "LogsBucketName" },
           "CorsConfiguration": {
             "CorsRules" : [{
@@ -109,13 +109,8 @@
                         "Sid": "GiveSESPermissionToWriteEmail",
                         "Effect": "Allow",
                         "Principal": {
-                            "Service": [
-                                "ses.amazonaws.com"
-                            ]
-                        },
-                        "Action": [
-                            "s3:PutObject"
-                        ],
+                            "Service": ["ses.amazonaws.com"]},
+                        "Action": ["s3:PutObject"],
                         "Resource": {"Fn::Join" : ["",[ "arn:aws:s3:::", { "Ref": "myS3LogBucket" }, "/emails/*" ] ]},
                         "Condition": {
                             "StringEquals": {
@@ -169,7 +164,7 @@
                   } ],
                   "Logging" :
                     {
-                      "Bucket" : { "Ref": "LogsBucketName" },
+                      "Bucket" : { "Fn::GetAtt" : [ "myS3LogBucket", "DomainName" ]},
                       "IncludeCookies" : "true",
                       "Prefix" : "CloudFront"
                     },
@@ -193,8 +188,7 @@
                   "AliasTarget" : {
                       "HostedZoneId" : "Z2FDTNDATAQYW2",
                       "DNSName" : { "Fn::GetAtt" : [ "myDistribution", "DomainName" ]}
-                  }
-              }]
+                  }}]
           }
       }
     },
