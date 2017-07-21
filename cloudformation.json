@@ -5,20 +5,25 @@
 
     },
     "Parameters": {
-      "BucketName": {
+      "SiteBucketName": {
           "Description": "Static website name. If registering with route 53, must be exact url (ie www.foo.io).",
           "Type": "String",
-          "Default": "mylabbucket"
+          "Default": ""
+      },
+      "LogsBucketName": {
+          "Description": "For collecting logs from S3, CloudFront, and emails from SES",
+          "Type": "String",
+          "Default": ""
       },
       "Project": {
           "Description": "Name of your project for various resource tags.",
           "Type": "String",
-          "Default": "s3 lab"
+          "Default": ""
       },
-      "HostedZoneId": {
+      "NakedDomainName": {
           "Description": "Optional. For registering your S3 website endpoint to a Route 53 Alias record set.",
           "Type": "String",
-          "Default": "Z3AQBSTGFYJSTF"
+          "Default": ""
       }
 
     },
@@ -26,15 +31,22 @@
 
     },
     "Conditions": {
-
+      "HasDomain" : {
+         "Fn::Not" : [{"Fn::Equals" : [{"Ref" : "NakedDomainName"}, ""]}]}
     },
+
     "Resources": {
       "myS3Bucket": {
         "Type": "AWS::S3::Bucket",
         "DeletionPolicy": "Retain",
         "Properties": {
           "AccessControl": "PublicRead",
-          "BucketName": { "Ref": "BucketName" },
+          "BucketName": { "Ref": "SiteBucketName" },
+          "LoggingConfiguration":
+            {
+              "DestinationBucketName" : { "Ref": "myS3LogBucket" },
+              "LogFilePrefix" : "S3"
+            },
           "CorsConfiguration": {
             "CorsRules" : [{
   							"AllowedHeaders" : ["*"],
@@ -57,7 +69,7 @@
         "Type": "AWS::S3::BucketPolicy",
         "DependsOn" : "myS3Bucket",
         "Properties": {
-          "Bucket" : { "Ref": "BucketName" },
+          "Bucket" : { "Ref": "SiteBucketName" },
           "PolicyDocument" : {
             "Version":"2012-10-17",
             "Statement": [{
@@ -65,9 +77,121 @@
               "Effect": "Allow",
               "Principal": "*",
               "Action": "s3:GetObject",
-              "Resource": {"Fn::Join" : ["",[ "arn:aws:s3:::", { "Ref": "BucketName" }, "/*" ] ]}}]}
+              "Resource": {"Fn::Join" : ["",[ "arn:aws:s3:::", { "Ref": "SiteBucketName" }, "/*" ] ]}}]}
         }
       },
+
+      "myS3LogBucket": {
+        "Type": "AWS::S3::Bucket",
+        "Properties": {
+          "AccessControl" : "LogDeliveryWrite",
+          "BucketName": { "Ref": "LogsBucketName" },
+          "CorsConfiguration": {
+            "CorsRules" : [{
+  							"AllowedHeaders" : ["*"],
+  							"AllowedMethods" : ["GET"],
+  							"AllowedOrigins" : ["*"],
+  							"MaxAge" : "3000"
+              }]
+          },
+          "Tags": [{"Key" : "Project", "Value" : { "Ref": "Project" }}]
+        }
+      },
+
+      "myS3LogBucketPolicy": {
+        "Type": "AWS::S3::BucketPolicy",
+        "Properties": {
+          "Bucket" : { "Ref": "myS3LogBucket" },
+          "PolicyDocument" :{
+                "Version": "2008-10-17",
+                "Statement": [
+                    {
+                        "Sid": "GiveSESPermissionToWriteEmail",
+                        "Effect": "Allow",
+                        "Principal": {
+                            "Service": ["ses.amazonaws.com"]},
+                        "Action": ["s3:PutObject"],
+                        "Resource": {"Fn::Join" : ["",[ "arn:aws:s3:::", { "Ref": "myS3LogBucket" }, "/emails/*" ] ]},
+                        "Condition": {
+                            "StringEquals": {
+                                "aws:Referer": { "Ref": "AWS::AccountId" }
+          }}}]}
+        }
+      },
+
+      "myCertificate" : {
+        "Condition" : "HasDomain",
+        "Type" : "AWS::CertificateManager::Certificate",
+        "Properties" : {
+          "DomainName" : { "Ref": "NakedDomainName" },
+          "SubjectAlternativeNames" : [{"Fn::Join" : ["",[ "www.", { "Ref": "NakedDomainName" } ] ]}],
+          "Tags" : [{"Key" : "Project", "Value" : { "Ref": "Project" }}]
+        }
+      },
+
+      "myDistribution" : {
+          "Condition" : "HasDomain",
+          "DependsOn" : "myCertificate",
+          "Type" : "AWS::CloudFront::Distribution",
+          "Properties" : {
+              "DistributionConfig" : {
+                  "Aliases" : [{ "Ref": "NakedDomainName" }],
+                  "Origins" : [ {
+                          "DomainName" : { "Fn::GetAtt" : [ "myS3Bucket", "DomainName" ]},
+                          "Id" : {"Fn::Join" : ["",[ { "Ref": "myS3Bucket" }, "-Origin" ] ]},
+                          "CustomOriginConfig" : {
+                              "HTTPPort" : "80",
+                              "HTTPSPort" : "443",
+                              "OriginProtocolPolicy" : "http-only"
+                          }
+                  } ],
+                  "Enabled" : "true",
+                  "Comment" : {"Fn::Join" : ["",[ "Distribution for ", { "Ref": "NakedDomainName" } ] ]},
+                  "DefaultRootObject" : "index.html",
+                  "DefaultCacheBehavior" : {
+                      "TargetOriginId" : {"Fn::Join" : ["",[ { "Ref": "myS3Bucket" }, "-Origin" ] ]},
+                      "ForwardedValues" : {
+                          "QueryString" : "false",
+                          "Cookies" : { "Forward" : "all" }
+                      },
+                      "ViewerProtocolPolicy" : "redirect-to-https"
+                  },
+                  "CustomErrorResponses" : [ {
+                      "ErrorCode" : "404",
+                      "ResponsePagePath" : "/error.html",
+                      "ResponseCode" : "200",
+                      "ErrorCachingMinTTL" : "30"
+                  } ],
+                  "Logging" :
+                    {
+                      "Bucket" : { "Fn::GetAtt" : [ "myS3LogBucket", "DomainName" ]},
+                      "IncludeCookies" : "true",
+                      "Prefix" : "CloudFront"
+                    },
+                  "PriceClass" : "PriceClass_100",
+                  "ViewerCertificate": {
+                    "AcmCertificateArn" : { "Ref": "myCertificate" },
+                    "SslSupportMethod" : "sni-only"
+                  }
+              }
+          }
+      },
+      "myDNS" : {
+          "Type" : "AWS::Route53::RecordSetGroup",
+          "Condition" : "HasDomain",
+          "DependsOn" : "myDistribution",
+          "Properties" : {
+              "HostedZoneName" : {"Fn::Join" : ["",[ { "Ref": "NakedDomainName" }, "." ] ]},
+              "RecordSets" : [{
+                  "Name" : { "Ref" : "NakedDomainName" },
+                  "Type" : "A",
+                  "AliasTarget" : {
+                      "HostedZoneId" : "Z2FDTNDATAQYW2",
+                      "DNSName" : { "Fn::GetAtt" : [ "myDistribution", "DomainName" ]}
+                  }}]
+          }
+      }
+    },
 
     "Outputs": {
       "myS3Bucket" : {
