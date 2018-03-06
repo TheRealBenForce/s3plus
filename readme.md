@@ -1,4 +1,4 @@
-# S3 Lab
+# S3plus
 
 ## About
 This project demonstrates basic serverless principals to build infrastructure for website hosting in an automated and secure manner that is distributed globally. The cloudformation template is designed to create a secure S3 bucket preconfigured for website hosting.
