@@ -129,6 +129,15 @@
         }
       },
 
+      "myCodePipelineBucket": {
+        "Type": "AWS::S3::Bucket",
+        "Properties": {
+          "AccessControl": "Private",
+          "BucketName": {"Fn::Join" : [".",[ "codepipeline", { "Ref": "myS3Bucket" } ] ]},
+          "Tags": [{"Key" : "Project", "Value" : { "Ref": "Project" }}]
+        }
+      },
+
       "myCertificate" : {
         "Condition" : "HasDomain",
         "Type" : "AWS::CertificateManager::Certificate",
@@ -225,56 +234,109 @@
           }
       },
 
-      "myCodeBuild" : {
-        "Type" : "AWS::CodeBuild::Project",
-        "Properties" : {
-          "Artifacts" : Artifacts,
-          "BadgeEnabled" : Boolean,
-          "Cache" : ProjectCache,
-          "Description" : String,
-          "EncryptionKey" : String,
-          "Environment" : Environment,
-          "Name" : String,
-          "ServiceRole" : String,
-          "Source" : Source,
-          "Tags" : [ Resource Tag, ... ],
-          "TimeoutInMinutes" : Integer,
-          "Triggers" : Triggers,
-          "VpcConfig" : VpcConfig
-        }
-      },
-
-        "myPipeline" :  {
+      "myPipeline" :  {
         "Type" : "AWS::CodePipeline::Pipeline",
         "Properties" : {
-          "Name" : "Build Static Site",
+          "Name" : "BuildStaticSite",
           "ArtifactStore" : {
             "Type": "S3",
             "Location": { "Ref": "myCodePipelineBucket" }
           },
-          "RestartExecutionOnUpdate" : "True",
           "RestartExecutionOnUpdate" : "False",
-          "RoleArn" : "String",
-          "Stages" :
-          {
-            "Name" : "Source",
-            "Actions" : [
-              {
-                "Category" : "Source",
-                "Owner" : "ThirdParty",
-                "Provider" : { "Ref": "SourceType" },
-                "Version" : "1"
-              },
-              {
-                "Category" : "Source",
-                "Owner" : "ThirdParty",
-                "Provider" : { "Ref": "SourceType" },
-                "Version" : "1"
-              },
-            ]
-          }
+          "RoleArn" : {"Fn::GetAtt" : ["myPipelineServiceRole", "Arn"] },
+          "Stages" : [
+            {
+              "Name" : "Source",
+              "Actions": [
+                {
+                  "Name": "SourceAction",
+                  "ActionTypeId": {
+                    "Category": "Source",
+                    "Owner": "AWS",
+                    "Version": "1",
+                    "Provider": "S3"
+                  },
+                  "Configuration": {
+                    "S3Bucket": { "Ref" : "myCodePipelineBucket" },
+                    "S3ObjectKey": "sourceaction.txt"
+                  },
+                  "OutputArtifacts": [
+                    {
+                      "Name": "SourceOutput"
+                    }
+                  ],
+                  "RunOrder": 1
+                }
+              ]
+            },
+            {
+              "Name" : "CodeBuildStaging",
+              "Actions": [
+                {
+                  "Name": "BuildStaging",
+                  "InputArtifacts" : [{"Name" : "SourceOutput"}],
+                  "ActionTypeId": {
+                    "Category": "Build",
+                    "Owner": "AWS",
+                    "Version": "1",
+                    "Provider": "CodeBuild"
+                  },
+                  "Configuration" : {
+                    "ProjectName" : "ConfigProject"
+                  },
+                  "RunOrder": 1
+                }
+              ]
+            }
+          ]
         }
-      }
+      },
+
+      "myPipelineServiceRole": {
+         "Type": "AWS::IAM::Role",
+         "Properties": {
+            "AssumeRolePolicyDocument": {
+              "Version" : "2012-10-17",
+              "Statement": [
+                {
+                 "Effect": "Allow",
+                 "Principal": {
+                    "Service": [
+                      "codebuild.amazonaws.com",
+                      "codepipeline.amazonaws.com"
+                    ]
+                 },
+                 "Action": [ "sts:AssumeRole" ]
+                }
+              ]
+            },
+            "Policies": [
+              {
+                "PolicyName" : "CodeBuildAndPipeline",
+                "PolicyDocument" : {
+                  "Version": "2012-10-17",
+                  "Statement": [
+                    {
+                      "Action": "logs:*",
+                      "Resource": "arn:aws:logs:*:*:*",
+                      "Effect": "Allow"
+                    },
+                    {
+                      "Action": [
+                          "s3:*"
+                      ],
+                      "Resource": [
+                        {"Fn::Join" : ["",[ { "Fn::GetAtt" : [ "myCodePipelineBucket", "Arn" ]}, "/*" ] ]},
+                        {"Fn::Join" : ["",[ { "Fn::GetAtt" : [ "myS3Bucket", "Arn" ]}, "/*" ] ]}
+                      ],
+                      "Effect": "Allow"
+                    }
+                  ]
+                }
+              }
+            ]
+         }
+       }
     },
 
     "Outputs": {
