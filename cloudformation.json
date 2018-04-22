@@ -155,7 +155,7 @@
                     ]
                   },
                   "Origins" : [ {
-                          "DomainName" : { "Fn::GetAtt" : [ "myS3Bucket", "DomainName" ]},
+                          "DomainName" : {"Fn::Join" : ["",[ { "Ref": "myS3Bucket" }, ".s3-website-", { "Ref": "AWS::Region" }, ".amazonaws.com" ] ]},
                           "Id" : {"Fn::Join" : ["",[ { "Ref": "myS3Bucket" }, "-Origin" ] ]},
                           "CustomOriginConfig" : {
                               "HTTPPort" : "80",
@@ -223,6 +223,57 @@
                       "DNSName" : { "Fn::GetAtt" : [ "myDistribution", "DomainName" ]}
                   }}]
           }
+      },
+
+      "myCodeBuild" : {
+        "Type" : "AWS::CodeBuild::Project",
+        "Properties" : {
+          "Artifacts" : Artifacts,
+          "BadgeEnabled" : Boolean,
+          "Cache" : ProjectCache,
+          "Description" : String,
+          "EncryptionKey" : String,
+          "Environment" : Environment,
+          "Name" : String,
+          "ServiceRole" : String,
+          "Source" : Source,
+          "Tags" : [ Resource Tag, ... ],
+          "TimeoutInMinutes" : Integer,
+          "Triggers" : Triggers,
+          "VpcConfig" : VpcConfig
+        }
+      },
+
+        "myPipeline" :  {
+        "Type" : "AWS::CodePipeline::Pipeline",
+        "Properties" : {
+          "Name" : "Build Static Site",
+          "ArtifactStore" : {
+            "Type": "S3",
+            "Location": { "Ref": "myCodePipelineBucket" }
+          },
+          "RestartExecutionOnUpdate" : "True",
+          "RestartExecutionOnUpdate" : "False",
+          "RoleArn" : "String",
+          "Stages" :
+          {
+            "Name" : "Source",
+            "Actions" : [
+              {
+                "Category" : "Source",
+                "Owner" : "ThirdParty",
+                "Provider" : { "Ref": "SourceType" },
+                "Version" : "1"
+              },
+              {
+                "Category" : "Source",
+                "Owner" : "ThirdParty",
+                "Provider" : { "Ref": "SourceType" },
+                "Version" : "1"
+              },
+            ]
+          }
+        }
       }
     },
 
