@@ -30,8 +30,33 @@
           "Type": "String",
           "AllowedPattern" : "^[a-zA-Z0-9]*$",
           "Default": "www"
+      },
+      "Branch": {
+          "Description": "Branch name to poll for changes in.",
+          "Type": "String"
+      },
+      "SupportEmail": {
+          "Description": "For receiving SNS notifications",
+          "Type": "String"
+      },
+      "GitHubOwner": {
+          "Description": "Name of the GitHub repo Owner",
+          "Type": "String"
+      },
+      "GitHubRepo": {
+          "Description": "Name of the GitHub repo",
+          "Type": "String"
+      },
+      "GitHubOAuthToken": {
+          "Description": "If using Github, token to allow access to repo",
+          "NoEcho" : "True",
+          "Type": "String"
+      },
+      "PipelineName": {
+          "Description": "Name for your build pipeline.",
+          "Type": "String",
+          "Default": "BuildStaticSite"
       }
-
     },
     "Mappings": {
 
@@ -75,6 +100,33 @@
         }
       },
 
+      "myS3StagingBucket": {
+        "Type": "AWS::S3::Bucket",
+        "Properties": {
+          "AccessControl": "PublicRead",
+          "BucketName": {"Fn::Join" : [".",[ "staging", { "Ref": "SiteBucketName" } ] ]},
+          "LoggingConfiguration":
+            {
+              "DestinationBucketName" : { "Ref": "myS3LogBucket" },
+              "LogFilePrefix" : "Staging"
+            },
+          "CorsConfiguration": {
+            "CorsRules" : [{
+  							"AllowedHeaders" : ["*"],
+  							"AllowedMethods" : ["GET"],
+  							"AllowedOrigins" : ["*"],
+  							"MaxAge" : "3000"
+              }]
+          },
+          "WebsiteConfiguration":
+            {
+              "ErrorDocument" : "error.html",
+              "IndexDocument" : "index.html"
+            },
+          "Tags": [{"Key" : "Project", "Value" : { "Ref": "Project" }}]
+        }
+      },
+
       "myS3BucketPolicy": {
         "Type": "AWS::S3::BucketPolicy",
         "DependsOn" : "myS3Bucket",
@@ -105,6 +157,21 @@
               }]
           },
           "Tags": [{"Key" : "Project", "Value" : { "Ref": "Project" }}]
+        }
+      },
+
+      "myS3StagingBucketPolicy": {
+        "Type": "AWS::S3::BucketPolicy",
+        "Properties": {
+          "Bucket" : { "Ref": "myS3StagingBucket" },
+          "PolicyDocument" : {
+            "Version":"2012-10-17",
+            "Statement": [{
+              "Sid": "Allow Public GET request",
+              "Effect": "Allow",
+              "Principal": "*",
+              "Action": "s3:GetObject",
+              "Resource": {"Fn::Join" : ["",[ "arn:aws:s3:::", { "Ref": "myS3StagingBucket" }, "/*" ] ]}}]}
         }
       },
 
@@ -148,6 +215,15 @@
             [{ "Ref": "AWS::NoValue" }]
             ]
           },
+          "Tags" : [{"Key" : "Project", "Value" : { "Ref": "Project" }}]
+        }
+      },
+
+      "myStagingCertificate" : {
+        "Condition" : "HasDomain",
+        "Type" : "AWS::CertificateManager::Certificate",
+        "Properties" : {
+          "DomainName" : { "Ref": "myS3StagingBucket" },
           "Tags" : [{"Key" : "Project", "Value" : { "Ref": "Project" }}]
         }
       },
@@ -203,6 +279,7 @@
               }
           }
       },
+
       "myDNS" : {
           "Type" : "AWS::Route53::RecordSetGroup",
           "Condition" : "HasDomain",
@@ -218,6 +295,7 @@
                   }}]
           }
       },
+
       "mySubDNS" : {
           "Type" : "AWS::Route53::RecordSetGroup",
           "Condition" : "HasSubDomain",
@@ -234,10 +312,76 @@
           }
       },
 
+      "myStagingDistribution" : {
+          "Condition" : "HasDomain",
+          "DependsOn" : "myStagingCertificate",
+          "Type" : "AWS::CloudFront::Distribution",
+          "Properties" : {
+              "DistributionConfig" : {
+                  "Aliases" : [
+                    { "Ref": "myS3StagingBucket" }
+                  ],
+                  "Origins" : [ {
+                          "DomainName" : {"Fn::Join" : ["",[ { "Ref": "myS3StagingBucket" }, ".s3-website-", { "Ref": "AWS::Region" }, ".amazonaws.com" ] ]},
+                          "Id" : {"Fn::Join" : ["",[ { "Ref": "myS3StagingBucket" }, "-Origin" ] ]},
+                          "CustomOriginConfig" : {
+                              "HTTPPort" : "80",
+                              "HTTPSPort" : "443",
+                              "OriginProtocolPolicy" : "http-only"
+                          }
+                  } ],
+                  "Enabled" : "true",
+                  "Comment" : {"Fn::Join" : ["",[ "Distribution for ", { "Ref": "myS3StagingBucket" } ] ]},
+                  "DefaultRootObject" : "index.html",
+                  "DefaultCacheBehavior" : {
+                      "TargetOriginId" : {"Fn::Join" : ["",[ { "Ref": "myS3StagingBucket" }, "-Origin" ] ]},
+                      "ForwardedValues" : {
+                          "QueryString" : "false",
+                          "Cookies" : { "Forward" : "all" }
+                      },
+                      "ViewerProtocolPolicy" : "redirect-to-https"
+                  },
+                  "CustomErrorResponses" : [ {
+                      "ErrorCode" : "404",
+                      "ResponsePagePath" : "/error.html",
+                      "ResponseCode" : "200",
+                      "ErrorCachingMinTTL" : "30"
+                  } ],
+                  "Logging" :
+                    {
+                      "Bucket" : { "Fn::GetAtt" : [ "myS3LogBucket", "DomainName" ]},
+                      "IncludeCookies" : "true",
+                      "Prefix" : "CloudFrontStaging"
+                    },
+                  "PriceClass" : "PriceClass_100",
+                  "ViewerCertificate": {
+                    "AcmCertificateArn" : { "Ref": "myStagingCertificate" },
+                    "SslSupportMethod" : "sni-only"
+                  }
+              }
+          }
+      },
+
+      "myStagingDNS" : {
+          "Type" : "AWS::Route53::RecordSetGroup",
+          "Condition" : "HasDomain",
+          "DependsOn" : "myStagingDistribution",
+          "Properties" : {
+              "HostedZoneName" : {"Fn::Join" : ["",[ { "Ref": "NakedDomainName" }, "." ] ]},
+              "RecordSets" : [{
+                  "Name" : { "Ref" : "myS3StagingBucket" },
+                  "Type" : "A",
+                  "AliasTarget" : {
+                      "HostedZoneId" : "Z2FDTNDATAQYW2",
+                      "DNSName" : { "Fn::GetAtt" : [ "myStagingDistribution", "DomainName" ]}
+                  }}]
+          }
+      },
+
       "myPipeline" :  {
         "Type" : "AWS::CodePipeline::Pipeline",
         "Properties" : {
-          "Name" : "BuildStaticSite",
+          "Name" : { "Ref": "PipelineName" },
           "ArtifactStore" : {
             "Type": "S3",
             "Location": { "Ref": "myCodePipelineBucket" }
@@ -248,21 +392,25 @@
             {
               "Name" : "Source",
               "Actions": [
+
                 {
-                  "Name": "SourceAction",
+                  "Name": "SourceCheckout",
                   "ActionTypeId": {
                     "Category": "Source",
-                    "Owner": "AWS",
+                    "Owner": "ThirdParty",
                     "Version": "1",
-                    "Provider": "S3"
+                    "Provider": "GitHub"
                   },
                   "Configuration": {
-                    "S3Bucket": { "Ref" : "myCodePipelineBucket" },
-                    "S3ObjectKey": "sourceaction.txt"
+                      "Owner": { "Ref": "GitHubOwner" },
+                      "Repo": { "Ref": "GitHubRepo" },
+                      "PollForSourceChanges" : "True",
+                      "Branch" : { "Ref": "Branch" },
+                      "OAuthToken" : { "Ref": "GitHubOAuthToken" }
                   },
                   "OutputArtifacts": [
                     {
-                      "Name": "SourceOutput"
+                      "Name": "SourceCode"
                     }
                   ],
                   "RunOrder": 1
@@ -274,7 +422,7 @@
               "Actions": [
                 {
                   "Name": "BuildStaging",
-                  "InputArtifacts" : [{"Name" : "SourceOutput"}],
+                  "InputArtifacts" : [{"Name" : "SourceCode"}],
                   "ActionTypeId": {
                     "Category": "Build",
                     "Owner": "AWS",
@@ -282,13 +430,167 @@
                     "Provider": "CodeBuild"
                   },
                   "Configuration" : {
-                    "ProjectName" : "ConfigProject"
+                    "ProjectName" : { "Ref": "myStagingCodeBuild" }
+                  },
+                  "RunOrder": 1
+                }
+              ]
+            },
+            {
+              "Name":"ApprovalNeeded",
+              "Actions":[
+                {
+                  "InputArtifacts":[
+
+                  ],
+                  "Name":"ApprovalNeeded",
+                  "ActionTypeId":{
+                    "Category":"Approval",
+                    "Owner":"AWS",
+                    "Version":"1",
+                    "Provider":"Manual"
+                  },
+                  "OutputArtifacts":[
+
+                  ],
+                  "Configuration":{
+                    "NotificationArn": {"Ref":"myTopic"},
+                    "CustomData":{"Fn::Join" : ["",[ "Staging code ready for approval at http://", { "Ref": "myS3StagingBucket" } ] ]}
+                  },
+                  "RunOrder":1
+                }
+              ]
+            },
+            {
+              "Name" : "CodeBuildProduction",
+              "Actions": [
+                {
+                  "Name": "BuildProduction",
+                  "InputArtifacts" : [{"Name" : "SourceCode"}],
+                  "ActionTypeId": {
+                    "Category": "Build",
+                    "Owner": "AWS",
+                    "Version": "1",
+                    "Provider": "CodeBuild"
+                  },
+                  "Configuration" : {
+                    "ProjectName" : { "Ref": "myProductionCodeBuild" }
                   },
                   "RunOrder": 1
                 }
               ]
             }
           ]
+        }
+      },
+
+      "myStagingCodeBuild": {
+        "Type": "AWS::CodeBuild::Project",
+        "Properties": {
+          "Name": "BuildStaging",
+          "Description": "Builds jekyll static site content and uploads to Staging S3 bucket.",
+          "ServiceRole": { "Fn::GetAtt": [ "myPipelineServiceRole", "Arn" ] },
+          "Artifacts": {
+            "Type": "CODEPIPELINE"
+          },
+          "Environment": {
+            "Type": "LINUX_CONTAINER",
+            "ComputeType": "BUILD_GENERAL1_SMALL",
+            "Image": "aws/codebuild/ruby:2.3.1",
+            "EnvironmentVariables": [
+              {
+                "Name": "STAGING_S3_BUCKET",
+                "Value": {"Fn::Join" : ["",[ "s3://", { "Ref": "myS3StagingBucket" } ] ]}
+              },
+              {
+                "Name": "PROD_S3_BUCKET",
+                "Value": {"Fn::Join" : ["",[ "s3://", { "Ref": "myS3Bucket" } ] ]}
+              },
+              {
+                "Name": "BUILD_STAGE",
+                "Value": "STAGING"
+              },
+              {
+                "Name": "AWS_REGION",
+                "Value": { "Ref": "AWS::Region" }
+              }
+            ]
+          },
+          "Source": {
+            "Type": "CODEPIPELINE"
+          },
+          "TimeoutInMinutes": 5,
+          "Tags": [
+            {
+              "Key": "Key1",
+              "Value": "Value1"
+            },
+            {
+              "Key": "Key2",
+              "Value": "Value2"
+            }
+          ]
+        }
+      },
+
+
+            "myProductionCodeBuild": {
+              "Type": "AWS::CodeBuild::Project",
+              "Properties": {
+                "Name": "BuildProduction",
+                "Description": "Builds jekyll static site content and uploads to Production S3 bucket.",
+                "ServiceRole": { "Fn::GetAtt": [ "myPipelineServiceRole", "Arn" ] },
+                "Artifacts": {
+                  "Type": "CODEPIPELINE"
+                },
+                "Environment": {
+                  "Type": "LINUX_CONTAINER",
+                  "ComputeType": "BUILD_GENERAL1_SMALL",
+                  "Image": "aws/codebuild/ruby:2.3.1",
+                  "EnvironmentVariables": [
+                    {
+                      "Name": "STAGING_S3_BUCKET",
+                      "Value": {"Fn::Join" : ["",[ "s3://", { "Ref": "myS3StagingBucket" } ] ]}
+                    },
+                    {
+                      "Name": "PROD_S3_BUCKET",
+                      "Value": {"Fn::Join" : ["",[ "s3://", { "Ref": "myS3Bucket" } ] ]}
+                    },
+                    {
+                      "Name": "BUILD_STAGE",
+                      "Value": "PRODUCTION"
+                    },
+                    {
+                      "Name": "AWS_REGION",
+                      "Value": { "Ref": "AWS::Region" }
+                    }
+                  ]
+                },
+                "Source": {
+                  "Type": "CODEPIPELINE"
+                },
+                "TimeoutInMinutes": 5,
+                "Tags": [
+                  {
+                    "Key": "Key1",
+                    "Value": "Value1"
+                  },
+                  {
+                    "Key": "Key2",
+                    "Value": "Value2"
+                  }
+                ]
+              }
+            },
+
+      "myTopic": {
+        "Type": "AWS::SNS::Topic",
+        "Properties": {
+          "DisplayName": "benforce.io infrastructure updates",
+          "Subscription" : [ {
+              "Endpoint" : { "Ref": "SupportEmail" },
+              "Protocol" : "email"
+          } ]
         }
       },
 
@@ -317,6 +619,11 @@
                   "Version": "2012-10-17",
                   "Statement": [
                     {
+                      "Action": "sns:Publish",
+                      "Resource": { "Ref": "myTopic" },
+                      "Effect": "Allow"
+                    },
+                    {
                       "Action": "logs:*",
                       "Resource": "arn:aws:logs:*:*:*",
                       "Effect": "Allow"
@@ -327,8 +634,14 @@
                       ],
                       "Resource": [
                         {"Fn::Join" : ["",[ { "Fn::GetAtt" : [ "myCodePipelineBucket", "Arn" ]}, "/*" ] ]},
+                        {"Fn::Join" : ["",[ { "Fn::GetAtt" : [ "myS3StagingBucket", "Arn" ]}, "/*" ] ]},
                         {"Fn::Join" : ["",[ { "Fn::GetAtt" : [ "myS3Bucket", "Arn" ]}, "/*" ] ]}
                       ],
+                      "Effect": "Allow"
+                    },
+                    {
+                      "Action": "codebuild:*",
+                      "Resource": "*",
                       "Effect": "Allow"
                     }
                   ]
@@ -343,6 +656,10 @@
       "myS3Bucket" : {
         "Description" : "S3 URL for website.",
         "Value" : { "Fn::GetAtt" : [ "myS3Bucket", "WebsiteURL" ]}
+      },
+      "myS3StagingBucket" : {
+        "Description" : "S3 URL for staging website.",
+        "Value" : {"Fn::Join" : [".",[ "staging", { "Ref" : "NakedDomainName" } ] ]}
       }
     }
 }
