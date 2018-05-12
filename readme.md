@@ -12,3 +12,5 @@ If the user also has a registered domain name with Amazon the template will:
 If desired the user can also:
 * Add a subdomain to the certificate.
 * Add a subdomain to Route 53 record set and point it to the CloudFront distribution.
+* Use the included Codebuild and Codepipeline workflow to stage changes to a staging bucket before moving to the s3 bucket.
+* Use the included IAM User to approve changes.
