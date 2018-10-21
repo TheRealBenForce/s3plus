@@ -5,6 +5,12 @@
 
     },
     "Parameters": {
+      "CertificateValidationMethod": {
+          "Description": "Method for validating SSL certificate.",
+          "Type": "String",
+          "Default": "DNS",
+          "AllowedValues": ["DNS", "EMAIL"]
+      },
       "SiteBucketName": {
           "Description": "Static website name. If registering with route 53, must be exact url (ie www.foo.io).",
           "Type": "String",
@@ -12,11 +18,6 @@
       },
       "LogsBucketName": {
           "Description": "For collecting logs from S3, CloudFront, and emails from SES",
-          "Type": "String",
-          "Default": ""
-      },
-      "Project": {
-          "Description": "Name of your project for various resource tags.",
           "Type": "String",
           "Default": ""
       },
@@ -33,7 +34,8 @@
       },
       "Branch": {
           "Description": "Branch name to poll for changes in.",
-          "Type": "String"
+          "Type": "String",
+          "Default": "master"
       },
       "SupportEmail": {
           "Description": "For receiving SNS notifications",
@@ -52,11 +54,6 @@
           "NoEcho" : "True",
           "Type": "String"
       },
-      "PipelineName": {
-          "Description": "Name for your build pipeline.",
-          "Type": "String",
-          "Default": "BuildStaticSite"
-      },
       "SiteApprover": {
           "Description": "Person authorized to approve site updates.",
           "Type": "String",
@@ -67,9 +64,6 @@
           "Type": "String",
           "NoEcho" : "True"
       }
-    },
-    "Mappings": {
-
     },
     "Conditions": {
       "HasDomain" : {
@@ -105,8 +99,7 @@
             {
               "ErrorDocument" : "error.html",
               "IndexDocument" : "index.html"
-            },
-          "Tags": [{"Key" : "Project", "Value" : { "Ref": "Project" }}]
+            }
         }
       },
 
@@ -132,8 +125,7 @@
             {
               "ErrorDocument" : "error.html",
               "IndexDocument" : "index.html"
-            },
-          "Tags": [{"Key" : "Project", "Value" : { "Ref": "Project" }}]
+            }
         }
       },
 
@@ -165,8 +157,7 @@
   							"AllowedOrigins" : ["*"],
   							"MaxAge" : "3000"
               }]
-          },
-          "Tags": [{"Key" : "Project", "Value" : { "Ref": "Project" }}]
+          }
         }
       },
 
@@ -210,8 +201,7 @@
         "Type": "AWS::S3::Bucket",
         "Properties": {
           "AccessControl": "Private",
-          "BucketName": {"Fn::Join" : [".",[ "codepipeline", { "Ref": "myS3Bucket" } ] ]},
-          "Tags": [{"Key" : "Project", "Value" : { "Ref": "Project" }}]
+          "BucketName": {"Fn::Join" : [".",[ "codepipeline", { "Ref": "myS3Bucket" } ] ]}
         }
       },
 
@@ -220,12 +210,12 @@
         "Type" : "AWS::CertificateManager::Certificate",
         "Properties" : {
           "DomainName" : { "Ref": "NakedDomainName" },
+          "ValidationMethod": { "Ref": "CertificateValidationMethod" },
           "SubjectAlternativeNames" : {"Fn::If": [ "HasSubDomain",
             [{ "Ref": "NakedDomainName" },{"Fn::Join" : [".",[ { "Ref": "SubDomainName" }, { "Ref": "NakedDomainName" } ] ]} ],
             [{ "Ref": "AWS::NoValue" }]
             ]
-          },
-          "Tags" : [{"Key" : "Project", "Value" : { "Ref": "Project" }}]
+          }
         }
       },
 
@@ -335,7 +325,7 @@
       "myPipeline" :  {
         "Type" : "AWS::CodePipeline::Pipeline",
         "Properties" : {
-          "Name" : {"Fn::Join" : ["-",[ { "Ref": "PipelineName" }, { "Ref": "AWS::StackName" } ] ]},
+          "Name" : {"Fn::Join" : ["-",[ "BuildStaticSite-", { "Ref": "AWS::StackName" } ] ]},
           "ArtifactStore" : {
             "Type": "S3",
             "Location": { "Ref": "myCodePipelineBucket" }
