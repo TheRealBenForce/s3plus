@@ -63,7 +63,16 @@
           "Description": "Password for site approver to login with.",
           "Type": "String",
           "NoEcho" : "True"
-      }
+      },
+      "InvalidateDistribution": {
+        "Description": "Should the entire cloudfront distrubution be invalidated after pushing to prod S3 bucket.",
+        "Type": "String",
+        "Default": "false",
+        "AllowedValues": [
+          "true",
+          "false"
+      ]
+    }
     },
     "Conditions": {
       "HasDomain" : {
@@ -463,17 +472,7 @@
           "Source": {
             "Type": "CODEPIPELINE"
           },
-          "TimeoutInMinutes": 5,
-          "Tags": [
-            {
-              "Key": "Key1",
-              "Value": "Value1"
-            },
-            {
-              "Key": "Key2",
-              "Value": "Value2"
-            }
-          ]
+          "TimeoutInMinutes": 5
         }
       },
 
@@ -509,6 +508,10 @@
                 "Value": { "Ref": "myDistribution" }
               },
               {
+                "Name": "INVALIDATE_DISTRIBUTION",
+                "Value": { "Ref": "InvalidateDistribution" }
+              },
+              {
                 "Name": "AWS_REGION",
                 "Value": { "Ref": "AWS::Region" }
               }
@@ -517,17 +520,7 @@
           "Source": {
             "Type": "CODEPIPELINE"
           },
-          "TimeoutInMinutes": 5,
-          "Tags": [
-            {
-              "Key": "Key1",
-              "Value": "Value1"
-            },
-            {
-              "Key": "Key2",
-              "Value": "Value2"
-            }
-          ]
+          "TimeoutInMinutes": 5
         }
       },
 
