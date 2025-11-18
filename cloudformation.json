@@ -1,6 +1,6 @@
 {
     "AWSTemplateFormatVersion": "2010-09-09",
-    "Description": "Deploys a serverless static website with lots of features and a pipeline.",
+    "Description": "Deploys a serverless static website with lots of features.",
     "Metadata": {
 
     },
@@ -32,37 +32,9 @@
           "AllowedPattern" : "^[a-zA-Z0-9]*$",
           "Default": "www"
       },
-      "Branch": {
-          "Description": "Branch name to poll for changes in.",
-          "Type": "String",
-          "Default": "master"
-      },
       "SupportEmail": {
           "Description": "For receiving SNS notifications",
           "Type": "String"
-      },
-      "GitHubOwner": {
-          "Description": "Name of the GitHub repo Owner",
-          "Type": "String"
-      },
-      "GitHubRepo": {
-          "Description": "Name of the GitHub repo",
-          "Type": "String"
-      },
-      "GitHubOAuthToken": {
-          "Description": "If using Github, token to allow access to repo",
-          "NoEcho" : "True",
-          "Type": "String"
-      },
-      "SiteApprover": {
-          "Description": "Person authorized to approve site updates.",
-          "Type": "String",
-          "Default": "SiteApprover"
-      },
-      "SiteApproverPassword": {
-          "Description": "Password for site approver to login with.",
-          "Type": "String",
-          "NoEcho" : "True"
       },
       "InvalidateDistribution": {
         "Description": "Should the entire cloudfront distrubution be invalidated after pushing to prod S3 bucket.",
@@ -205,15 +177,6 @@
           }}}]}
         }
       },
-
-      "myCodePipelineBucket": {
-        "Type": "AWS::S3::Bucket",
-        "Properties": {
-          "AccessControl": "Private",
-          "BucketName": {"Fn::Join" : [".",[ "codepipeline", { "Ref": "myS3Bucket" } ] ]}
-        }
-      },
-
       "myCertificate" : {
         "Condition" : "HasDomain",
         "Type" : "AWS::CertificateManager::Certificate",
@@ -314,7 +277,6 @@
           }
       },
 
-
       "myStagingDNS" : {
           "Type" : "AWS::Route53::RecordSetGroup",
           "Condition" : "HasSubDomain",
@@ -330,200 +292,6 @@
           }
       },
 
-
-      "myPipeline" :  {
-        "Type" : "AWS::CodePipeline::Pipeline",
-        "Properties" : {
-          "Name" : {"Fn::Join" : ["-",[ "BuildStaticSite-", { "Ref": "AWS::StackName" } ] ]},
-          "ArtifactStore" : {
-            "Type": "S3",
-            "Location": { "Ref": "myCodePipelineBucket" }
-          },
-          "RestartExecutionOnUpdate" : "False",
-          "RoleArn" : {"Fn::GetAtt" : ["myPipelineServiceRole", "Arn"] },
-          "Stages" : [
-            {
-              "Name" : "Source",
-              "Actions": [
-
-                {
-                  "Name": "SourceCheckout",
-                  "ActionTypeId": {
-                    "Category": "Source",
-                    "Owner": "ThirdParty",
-                    "Version": "1",
-                    "Provider": "GitHub"
-                  },
-                  "Configuration": {
-                      "Owner": { "Ref": "GitHubOwner" },
-                      "Repo": { "Ref": "GitHubRepo" },
-                      "PollForSourceChanges" : "True",
-                      "Branch" : { "Ref": "Branch" },
-                      "OAuthToken" : { "Ref": "GitHubOAuthToken" }
-                  },
-                  "OutputArtifacts": [
-                    {
-                      "Name": "SourceCode"
-                    }
-                  ],
-                  "RunOrder": 1
-                }
-              ]
-            },
-            {
-              "Name" : "CodeBuildStaging",
-              "Actions": [
-                {
-                  "Name": "BuildStaging",
-                  "InputArtifacts" : [{"Name" : "SourceCode"}],
-                  "ActionTypeId": {
-                    "Category": "Build",
-                    "Owner": "AWS",
-                    "Version": "1",
-                    "Provider": "CodeBuild"
-                  },
-                  "Configuration" : {
-                    "ProjectName" : { "Ref": "myStagingCodeBuild" }
-                  },
-                  "RunOrder": 1
-                }
-              ]
-            },
-            {
-              "Name":"ApprovalNeeded",
-              "Actions":[
-                {
-                  "InputArtifacts":[
-
-                  ],
-                  "Name":"ApprovalNeeded",
-                  "ActionTypeId":{
-                    "Category":"Approval",
-                    "Owner":"AWS",
-                    "Version":"1",
-                    "Provider":"Manual"
-                  },
-                  "OutputArtifacts":[
-
-                  ],
-                  "Configuration":{
-                    "NotificationArn": {"Ref":"myTopic"},
-                    "CustomData":{"Fn::Join" : ["",[ "Staging code ready for approval at http://", { "Ref": "myS3StagingBucket" } ] ]}
-                  },
-                  "RunOrder":1
-                }
-              ]
-            },
-            {
-              "Name" : "CodeBuildProduction",
-              "Actions": [
-                {
-                  "Name": "BuildProduction",
-                  "InputArtifacts" : [{"Name" : "SourceCode"}],
-                  "ActionTypeId": {
-                    "Category": "Build",
-                    "Owner": "AWS",
-                    "Version": "1",
-                    "Provider": "CodeBuild"
-                  },
-                  "Configuration" : {
-                    "ProjectName" : { "Ref": "myProductionCodeBuild" }
-                  },
-                  "RunOrder": 1
-                }
-              ]
-            }
-          ]
-        }
-      },
-
-      "myStagingCodeBuild": {
-        "Type": "AWS::CodeBuild::Project",
-        "Properties": {
-          "Name": {"Fn::Join" : ["-",[ "BuildStaging", { "Ref": "AWS::StackName" } ] ]},
-          "Description": "Builds jekyll static site content and uploads to Staging S3 bucket.",
-          "ServiceRole": { "Fn::GetAtt": [ "myPipelineServiceRole", "Arn" ] },
-          "Artifacts": {
-            "Type": "CODEPIPELINE"
-          },
-          "Environment": {
-            "Type": "LINUX_CONTAINER",
-            "ComputeType": "BUILD_GENERAL1_SMALL",
-            "Image": "aws/codebuild/ruby:2.3.1",
-            "EnvironmentVariables": [
-              {
-                "Name": "STAGING_S3_BUCKET",
-                "Value": {"Fn::Join" : ["",[ "s3://", { "Ref": "myS3StagingBucket" } ] ]}
-              },
-              {
-                "Name": "PROD_S3_BUCKET",
-                "Value": {"Fn::Join" : ["",[ "s3://", { "Ref": "myS3Bucket" } ] ]}
-              },
-              {
-                "Name": "BUILD_STAGE",
-                "Value": "STAGING"
-              },
-              {
-                "Name": "AWS_REGION",
-                "Value": { "Ref": "AWS::Region" }
-              }
-            ]
-          },
-          "Source": {
-            "Type": "CODEPIPELINE"
-          },
-          "TimeoutInMinutes": 5
-        }
-      },
-
-
-      "myProductionCodeBuild": {
-        "Type": "AWS::CodeBuild::Project",
-        "Properties": {
-          "Name": {"Fn::Join" : ["-",[ "BuildProduction", { "Ref": "AWS::StackName" } ] ]},
-          "Description": "Builds jekyll static site content and uploads to Production S3 bucket.",
-          "ServiceRole": { "Fn::GetAtt": [ "myPipelineServiceRole", "Arn" ] },
-          "Artifacts": {
-            "Type": "CODEPIPELINE"
-          },
-          "Environment": {
-            "Type": "LINUX_CONTAINER",
-            "ComputeType": "BUILD_GENERAL1_SMALL",
-            "Image": "aws/codebuild/ruby:2.3.1",
-            "EnvironmentVariables": [
-              {
-                "Name": "STAGING_S3_BUCKET",
-                "Value": {"Fn::Join" : ["",[ "s3://", { "Ref": "myS3StagingBucket" } ] ]}
-              },
-              {
-                "Name": "PROD_S3_BUCKET",
-                "Value": {"Fn::Join" : ["",[ "s3://", { "Ref": "myS3Bucket" } ] ]}
-              },
-              {
-                "Name": "BUILD_STAGE",
-                "Value": "PRODUCTION"
-              },
-              {
-                "Name": "PROD_DISTRIBUTION",
-                "Value": { "Ref": "myDistribution" }
-              },
-              {
-                "Name": "INVALIDATE_DISTRIBUTION",
-                "Value": { "Ref": "InvalidateDistribution" }
-              },
-              {
-                "Name": "AWS_REGION",
-                "Value": { "Ref": "AWS::Region" }
-              }
-            ]
-          },
-          "Source": {
-            "Type": "CODEPIPELINE"
-          },
-          "TimeoutInMinutes": 5
-        }
-      },
-
       "myTopic": {
         "Type": "AWS::SNS::Topic",
         "Properties": {
@@ -533,92 +301,7 @@
               "Protocol" : "email"
           } ]
         }
-      },
-
-      "myPipelineServiceRole": {
-         "Type": "AWS::IAM::Role",
-         "Properties": {
-            "AssumeRolePolicyDocument": {
-              "Version" : "2012-10-17",
-              "Statement": [
-                {
-                 "Effect": "Allow",
-                 "Principal": {
-                    "Service": [
-                      "codebuild.amazonaws.com",
-                      "codepipeline.amazonaws.com"
-                    ]
-                 },
-                 "Action": [ "sts:AssumeRole" ]
-                }
-              ]
-            },
-            "Policies": [
-              {
-                "PolicyName" : "CodeBuildAndPipeline",
-                "PolicyDocument" : {
-                  "Version": "2012-10-17",
-                  "Statement": [
-                    {
-                      "Action": "sns:Publish",
-                      "Resource": { "Ref": "myTopic" },
-                      "Effect": "Allow"
-                    },
-                    {
-                      "Action": "logs:*",
-                      "Resource": "arn:aws:logs:*:*:*",
-                      "Effect": "Allow"
-                    },
-                    {
-                      "Action": [
-                          "s3:*"
-                      ],
-                      "Resource": [
-                        {"Fn::Join" : ["",[ { "Fn::GetAtt" : [ "myCodePipelineBucket", "Arn" ]}, "/*" ] ]},
-                        {"Fn::Join" : ["",[ { "Fn::GetAtt" : [ "myS3StagingBucket", "Arn" ]}, "/*" ] ]},
-                        {"Fn::Join" : ["",[ { "Fn::GetAtt" : [ "myS3Bucket", "Arn" ]}, "/*" ] ]}
-                      ],
-                      "Effect": "Allow"
-                    },
-                    {
-                      "Action": "codebuild:*",
-                      "Resource": "*",
-                      "Effect": "Allow"
-                    },
-                    {
-                      "Action": "cloudfront:createInvalidation",
-                      "Resource": "*",
-                      "Effect": "Allow"
-                    }
-                  ]
-                }
-              }
-            ]
-         }
-       },
-       "SiteApproverUser": {
-          "Type": "AWS::IAM::User",
-          "Properties": {
-             "UserName" : { "Ref": "SiteApprover" },
-             "Path": "/",
-             "LoginProfile": { "Password" : { "Ref": "SiteApproverPassword" } },
-             "Policies": [
-              {
-                "PolicyName" : "ApproveSiteUpdates",
-                 "PolicyDocument" : {
-                    "Version": "2012-10-17",
-                    "Statement" : [
-                      {
-                       "Effect" : "Allow",
-                       "Action" : [ "codepipeline:PutApprovalResult" ],
-                       "Resource" : [ "*" ]
-                      }
-                    ]
-                }
-              }
-            ]
-          }
-        }
+      }
     },
 
     "Outputs": {
